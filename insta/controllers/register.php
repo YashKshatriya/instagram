@@ -1,54 +1,61 @@
 <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 include 'db.php';
 
-// Enable error reporting
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Check if required fields are set
-    if (!isset($_POST['username']) || !isset($_POST['email']) || !isset($_POST['password']) || !isset($_POST['confirm_password'])) {
-        exit("Error: Missing required fields.");
-    }
-
-    $username = trim($_POST['username']);
     $email = trim($_POST['email']);
-    $password = $_POST['password'];
-    $confirm_password = $_POST['confirm_password'];
+    $username = trim($_POST['username']);
+    $password = trim($_POST['password']);
 
     // Validate inputs
-    if (empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
-        exit("Error: All fields are required.");
+    if (empty($email) || empty($username) || empty($password)) {
+        $_SESSION['error'] = "All fields are required!";
+        header("Location: /");
+        exit();
     }
 
-    if ($password !== $confirm_password) {
-        exit("Error: Passwords do not match.");
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $_SESSION['error'] = "Invalid email format!";
+        header("Location: /");
+        exit();
     }
 
-    // Secure input
-    $username = mysqli_real_escape_string($conn, $username);
-    $email = mysqli_real_escape_string($conn, $email);
+    // Check if email or username already exists - using prepared statements for security
+    $stmt = $conn->prepare("SELECT id FROM users WHERE email = ? OR username = ?");
+    $stmt->bind_param("ss", $email, $username);
+    $stmt->execute();
+    $stmt->store_result();
     
-    // Hash password
-    $hashed_password = password_hash($password, PASSWORD_BCRYPT);
-
-    // Check if email or username exists
-    $check_query = "SELECT * FROM users WHERE email = '$email' OR username = '$username'";
-    $result = mysqli_query($conn, $check_query);
-
-    if ($result && mysqli_num_rows($result) > 0) {
-        exit("Error: Username or Email already registered!");
-    } else {
-        $query = "INSERT INTO users (username, email, password) VALUES ('$username', '$email', '$hashed_password')";
-        if (mysqli_query($conn, $query)) {
-            echo "Registration successful!";
-        } else {
-            echo "Error: " . mysqli_error($conn);
-        }
+    if ($stmt->num_rows > 0) {
+        $_SESSION['error'] = "Email or username already exists!";
+        header("Location: /");
+        exit();
     }
+    $stmt->close();
+
+    // Hash password
+    $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+
+    // Insert user into database
+    $stmt = $conn->prepare("INSERT INTO users (email, username, password) VALUES (?, ?, ?)");
+    $stmt->bind_param("sss", $email, $username, $hashedPassword);
+    
+    if ($stmt->execute()) {
+        $_SESSION['success'] = "Account created successfully!";
+        header("Location: /login");
+    } else {
+        $_SESSION['error'] = "Something went wrong. Please try again.";
+        header("Location: /");
+    }
+    
+    $stmt->close();
 }
 
-// Ensure the UI is always rendered
-require "views/register_view.php";
+$conn->close();
+
+// Display the register page
+require 'views/register_view.php';
 ?>
